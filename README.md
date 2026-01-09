@@ -7,3 +7,10 @@
 ``` zsh
 colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 ```
+
+## 运行
+
+``` zsh
+source install/setup.zsh && ros2 launch nav_serial serial_driver.launch.py
+# 如果是bash根据自己的情况改为bash
+```
