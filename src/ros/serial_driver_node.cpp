@@ -15,8 +15,8 @@ SerialDriverNode::SerialDriverNode(const rclcpp::NodeOptions& options)
   RCLCPP_INFO(get_logger(), "Initializing Serial Driver Node...");
   
   declare_parameters();
-  setup_driver();
   setup_ros_interfaces();
+  setup_driver();
   
   RCLCPP_INFO(get_logger(), "Serial Driver Node initialized successfully");
 }
@@ -42,7 +42,8 @@ void SerialDriverNode::declare_parameters() {
   declare_parameter<int>("max_reconnect_attempts", -1);
   
   // ROS 配置
-  declare_parameter<std::string>("frame_id", "gimbal_yaw");
+  declare_parameter<std::string>("base_frame_id", "base_link");
+  declare_parameter<std::string>("gimbal_frame_id", "gimbal_yaw");
   declare_parameter<bool>("enable_statistics", true);
   declare_parameter<int>("statistics_interval_sec", 10);
 }
@@ -56,7 +57,8 @@ driver::SerialConfig SerialDriverNode::load_config() {
   config.reconnect_interval_ms = get_parameter("reconnect_interval_ms").as_int();
   config.max_reconnect_attempts = get_parameter("max_reconnect_attempts").as_int();
   
-  frame_id_ = get_parameter("frame_id").as_string();
+  base_frame_id_ = get_parameter("base_frame_id").as_string();
+  gimbal_frame_id_ = get_parameter("gimbal_frame_id").as_string();
   
   return config;
 }
@@ -92,6 +94,10 @@ void SerialDriverNode::setup_driver() {
   if (!driver_->start()) {
     RCLCPP_ERROR(get_logger(), "Failed to start serial driver: %s", 
                  driver_->last_error().c_str());
+  } else {
+    // 立即发送默认值(0,0,0)，确保下位机能收到数据并开始回复
+    driver_->send(current_cmd_);
+    RCLCPP_INFO(get_logger(), "Sent initial default command (0,0,0) to start communication");
   }
 }
 
@@ -100,14 +106,17 @@ void SerialDriverNode::setup_driver() {
 //=============================================================================
 
 void SerialDriverNode::setup_ros_interfaces() {
+  // 初始化TF广播器
+  tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
+  
   // 订阅速度指令
   cmd_vel_sub_ = create_subscription<geometry_msgs::msg::Twist>(
     "cmd_vel", rclcpp::QoS(10),
     std::bind(&SerialDriverNode::on_cmd_vel, this, std::placeholders::_1));
   
-  // 发布 IMU 数据
-  imu_pub_ = create_publisher<sensor_msgs::msg::Imu>(
-    "serial/gimbal_joint_state", rclcpp::QoS(10));
+  // 发布云台状态
+  gimbal_state_pub_ = create_publisher<rm_interfaces::msg::GimbalState>(
+    "/serial/gimbal_joint_state", rclcpp::QoS(10));
   
   // 重连服务
   reconnect_srv_ = create_service<std_srvs::srv::Trigger>(
@@ -127,20 +136,9 @@ void SerialDriverNode::setup_ros_interfaces() {
       std::bind(&SerialDriverNode::on_statistics_timer, this));
   }
   
-  // 发送定时器
-  int send_rate = get_parameter("send_rate").as_int();
-  send_timer_ = create_wall_timer(
-    std::chrono::milliseconds(1000 / send_rate),
-    std::bind(&SerialDriverNode::on_send_timer, this));
-  
-  // IMU发布定时器 (与发送频率相同)
-  publish_timer_ = create_wall_timer(
-    std::chrono::milliseconds(1000 / send_rate),
-    std::bind(&SerialDriverNode::on_publish_timer, this));
-  
   RCLCPP_INFO(get_logger(), "ROS Interfaces:");
   RCLCPP_INFO(get_logger(), "  Subscribe: %s", cmd_vel_sub_->get_topic_name());
-  RCLCPP_INFO(get_logger(), "  Publish: %s", imu_pub_->get_topic_name());
+  RCLCPP_INFO(get_logger(), "  Publish: %s", gimbal_state_pub_->get_topic_name());
   RCLCPP_INFO(get_logger(), "  Service: %s", reconnect_srv_->get_service_name());
 }
 
@@ -153,6 +151,11 @@ void SerialDriverNode::on_cmd_vel(const geometry_msgs::msg::Twist::SharedPtr msg
   current_cmd_.vx = static_cast<float>(msg->linear.x);
   current_cmd_.vy = static_cast<float>(msg->linear.y);
   current_cmd_.wz = static_cast<float>(msg->angular.z);
+  
+  // 立即更新驱动层的发送数据
+  if (driver_) {
+    driver_->send(current_cmd_);
+  }
 }
 
 rcl_interfaces::msg::SetParametersResult SerialDriverNode::on_parameters_change(
@@ -171,9 +174,12 @@ rcl_interfaces::msg::SetParametersResult SerialDriverNode::on_parameters_change(
         result.successful = false;
         result.reason = "send_rate must be positive";
       }
-    } else if (param.get_name() == "frame_id") {
-      frame_id_ = param.as_string();
-      RCLCPP_INFO(get_logger(), "Updated frame_id to %s", frame_id_.c_str());
+    } else if (param.get_name() == "gimbal_frame_id") {
+      gimbal_frame_id_ = param.as_string();
+      RCLCPP_INFO(get_logger(), "Updated gimbal_frame_id to %s", gimbal_frame_id_.c_str());
+    } else if (param.get_name() == "base_frame_id") {
+      base_frame_id_ = param.as_string();
+      RCLCPP_INFO(get_logger(), "Updated base_frame_id to %s", base_frame_id_.c_str());
     }
   }
   
@@ -211,8 +217,15 @@ void SerialDriverNode::on_driver_state_change(
 void SerialDriverNode::on_driver_receive(const protocol::ChassisState& state) {
   // 更新当前云台状态
   current_state_ = state;
-  RCLCPP_INFO(get_logger(), "RX: roll=%.2f, pitch=%.2f, yaw=%.2f", 
-              state.roll, state.pitch, state.yaw);
+  
+  // 立即发布GimbalState消息（检查发布器是否已创建）
+  if (gimbal_state_pub_) {
+    auto gimbal_msg = chassis_state_to_gimbal_state(current_state_);
+    gimbal_state_pub_->publish(gimbal_msg);
+    
+    RCLCPP_INFO(get_logger(), "RX & Published: roll=%.2f, pitch=%.2f, yaw=%.2f", 
+                state.roll, state.pitch_chassis, state.yaw_chassis);
+  }
 }
 
 void SerialDriverNode::on_driver_error(const std::string& error) {
@@ -264,30 +277,15 @@ void SerialDriverNode::on_reconnect_request(
 // 数据转换
 //=============================================================================
 
-sensor_msgs::msg::Imu SerialDriverNode::chassis_state_to_imu(
+rm_interfaces::msg::GimbalState SerialDriverNode::chassis_state_to_gimbal_state(
   const protocol::ChassisState& state)
 {
-  sensor_msgs::msg::Imu msg;
-  msg.header.stamp = now();
-  msg.header.frame_id = frame_id_;
+  rm_interfaces::msg::GimbalState msg;
+  // msg.header.stamp = now();
+  // msg.header.frame_id = gimbal_frame_id_;
   
-  // 欧拉角转四元数 (ZYX顺序)
-  double cy = std::cos(state.yaw * 0.5);
-  double sy = std::sin(state.yaw * 0.5);
-  double cp = std::cos(state.pitch * 0.5);
-  double sp = std::sin(state.pitch * 0.5);
-  double cr = std::cos(state.roll * 0.5);
-  double sr = std::sin(state.roll * 0.5);
-  
-  msg.orientation.w = cr * cp * cy + sr * sp * sy;
-  msg.orientation.x = sr * cp * cy - cr * sp * sy;
-  msg.orientation.y = cr * sp * cy + sr * cp * sy;
-  msg.orientation.z = cr * cp * sy - sr * sp * cy;
-  
-  // 协方差设置为-1表示未知
-  msg.orientation_covariance[0] = -1;
-  msg.angular_velocity_covariance[0] = -1;
-  msg.linear_acceleration_covariance[0] = -1;
+  msg.pitch = state.pitch_chassis;  // 底盘pitch角
+  msg.yaw = state.yaw_chassis;      // 底盘yaw角
   
   return msg;
 }
@@ -295,20 +293,6 @@ sensor_msgs::msg::Imu SerialDriverNode::chassis_state_to_imu(
 //=============================================================================
 // 定时器回调
 //=============================================================================
-
-void SerialDriverNode::on_send_timer() {
-  if (driver_) {
-    driver_->send(current_cmd_);
-    RCLCPP_INFO(get_logger(), "TX: vx=%.2f, vy=%.2f, wz=%.2f", 
-                current_cmd_.vx, current_cmd_.vy, current_cmd_.wz);
-  }
-}
-
-void SerialDriverNode::on_publish_timer() {
-  // 定时发布当前云台状态
-  auto imu_msg = chassis_state_to_imu(current_state_);
-  imu_pub_->publish(imu_msg);
-}
 
 void SerialDriverNode::on_statistics_timer() {
   if (!driver_) return;

@@ -152,7 +152,6 @@ private:
   void disconnect();
   void receive_loop();
   void send_loop();
-  void reconnect_loop();
   
   // 配置
   SerialConfig config_;

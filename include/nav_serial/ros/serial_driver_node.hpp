@@ -10,9 +10,13 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/twist.hpp>
-#include <sensor_msgs/msg/imu.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <rm_interfaces/msg/gimbal_state.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2_ros/transform_broadcaster.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 #include "nav_serial/driver/serial_driver.hpp"
 
@@ -46,12 +50,10 @@ private:
     std::shared_ptr<std_srvs::srv::Trigger::Response> response);
   
   //--- 数据转换 ---
-  sensor_msgs::msg::Imu chassis_state_to_imu(const protocol::ChassisState& state);
+  rm_interfaces::msg::GimbalState chassis_state_to_gimbal_state(const protocol::ChassisState& state);
   
   //--- 定时器回调 ---
   void on_statistics_timer();
-  void on_send_timer();
-  void on_publish_timer();
   
   //--- 成员变量 ---
   std::unique_ptr<driver::SerialDriver> driver_;
@@ -64,11 +66,10 @@ private:
   
   // ROS 接口
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
-  rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
+  rclcpp::Publisher<rm_interfaces::msg::GimbalState>::SharedPtr gimbal_state_pub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reconnect_srv_;
   rclcpp::TimerBase::SharedPtr stats_timer_;
-  rclcpp::TimerBase::SharedPtr send_timer_;
-  rclcpp::TimerBase::SharedPtr publish_timer_;
+  std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   
   // 参数回调句柄
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
@@ -80,7 +81,8 @@ private:
   size_t last_rx_errors_{0};
   
   // 配置
-  std::string frame_id_{"gimbal_yaw"};
+  std::string base_frame_id_{"base_link"};
+  std::string gimbal_frame_id_{"gimbal_yaw"};
 };
 
 }  // namespace nav_serial::ros
