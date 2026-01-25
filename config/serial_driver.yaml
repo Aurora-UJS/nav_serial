@@ -30,8 +30,9 @@
     # ROS 配置
     #=========================================================================
     
-    # IMU 消息的 frame_id
-    frame_id: "gimbal_yaw"
+    # TF frame IDs
+    base_frame_id: "base_link"
+    gimbal_frame_id: "gimbal_yaw"
     
     # 是否启用统计信息输出
     enable_statistics: false

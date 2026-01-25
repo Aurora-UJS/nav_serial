@@ -64,7 +64,7 @@ def generate_launch_description():
         remappings=[
             # 话题重映射（去掉前导斜杠以支持命名空间）
             ('cmd_vel', 'cmd_vel'),
-            ('serial/gimbal_joint_state', 'serial/gimbal_joint_state'),
+            ('/serial/gimbal_joint_state', '/serial/gimbal_joint_state'),
             ('serial/reconnect', 'serial/reconnect'),
         ]
     )

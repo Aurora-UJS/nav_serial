@@ -5,8 +5,24 @@
 #include "nav_serial/uart_transporter.hpp"
 
 #include <iostream>
+#include <cstdlib>
 
 namespace nav_serial::driver {
+
+// Debug模式开关：通过环境变量SERIAL_DEBUG=1启用
+static bool is_debug_enabled() {
+  static bool checked = false;
+  static bool enabled = false;
+  if (!checked) {
+    const char* env = std::getenv("SERIAL_DEBUG");
+    enabled = (env != nullptr && std::string(env) == "1");
+    checked = true;
+    if (enabled) {
+      std::printf("[DEBUG] Serial debug mode ENABLED\n");
+    }
+  }
+  return enabled;
+}
 
 //=============================================================================
 // 构造与析构
@@ -146,7 +162,7 @@ void SerialDriver::send_loop() {
           ++stats_.reconnect_count;
         }
       } else {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));  // 减少等待时间
       }
       continue;
     }
@@ -156,6 +172,17 @@ void SerialDriver::send_loop() {
     {
       std::lock_guard<std::mutex> lock(send_mutex_);
       packet = send_data_.to_packet();
+    }
+    
+    // 打印发送的原始数据（仅在DEBUG模式）
+    if (is_debug_enabled()) {
+      const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&packet);
+      std::printf("[SERIAL TX] Sending %zu bytes: ", sizeof(packet));
+      for (size_t i = 0; i < sizeof(packet); ++i) {
+        std::printf("%02X ", bytes[i]);
+      }
+      std::printf("(vx=%.2f, vy=%.2f, wz=%.2f)\n", 
+                  send_data_.vx, send_data_.vy, send_data_.wz);
     }
     
     if (transporter_ && transporter_->isOpen()) {
@@ -182,21 +209,33 @@ void SerialDriver::send_loop() {
 //=============================================================================
 
 void SerialDriver::receive_loop() {
-  std::array<uint8_t, 64> buffer{};
+  std::array<uint8_t, 256> buffer{};  // 增大缓冲区以应对突发数据
   
   while (running_.load()) {
     if (state_.load() != DriverState::CONNECTED || !transporter_ || !transporter_->isOpen()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));  // 减少等待时间提高响应速度
       continue;
     }
     
     int len = transporter_->read(buffer.data(), buffer.size());
     
     if (len > 0) {
+      // 打印接收到的原始数据（仅在DEBUG模式）
+      if (is_debug_enabled()) {
+        std::printf("[SERIAL RX] Received %d bytes: ", len);
+        for (int i = 0; i < len; ++i) {
+          std::printf("%02X ", buffer[i]);
+        }
+        std::printf("\n");
+      }
+      
       auto result = parser_.feed(buffer.data(), len);
       if (result != protocol::ParseResult::SUCCESS && 
           result != protocol::ParseResult::INCOMPLETE_DATA) {
         ++stats_.rx_errors;
+        if (is_debug_enabled()) {
+          std::printf("[SERIAL RX] Parse error: %s\n", protocol::to_string(result));
+        }
       }
     } else if (len < 0) {
       // 读取错误

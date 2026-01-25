@@ -9,10 +9,24 @@
 #include <optional>
 #include <array>
 #include <functional>
+#include <cstdlib>
+#include <cstdio>
 
 #include "nav_serial/crc.hpp"
 
 namespace nav_serial::protocol {
+
+// Debug模式检查
+static inline bool is_packet_debug_enabled() {
+  static bool checked = false;
+  static bool enabled = false;
+  if (!checked) {
+    const char* env = std::getenv("SERIAL_DEBUG");
+    enabled = (env != nullptr && std::string(env) == "1");
+    checked = true;
+  }
+  return enabled;
+}
 
 // 使用 crc 函数
 using aurora::serial_driver::crc8_calculate;
@@ -24,6 +38,7 @@ using aurora::serial_driver::crc8_calculate;
 constexpr uint8_t FRAME_HEADER = 0xFF;
 constexpr uint8_t FRAME_TAIL = 0x0D;
 constexpr size_t PACKET_SIZE = 15;
+constexpr size_t CRC_CHECK_SIZE = 13;
 
 // 数据包字段偏移量
 namespace offset {
@@ -49,14 +64,14 @@ struct RawPacket {
   uint8_t crc{0};
   uint8_t tail{FRAME_TAIL};
   
-  // 计算CRC
+  // 计算CRC - 对帧头和数据部分计算 (初始值0xFF)
   void calculate_crc() {
-    crc = crc8_calculate(reinterpret_cast<const uint8_t*>(&data1), 12);
+    crc = crc8_calculate(reinterpret_cast<const uint8_t*>(&header), 13);
   }
   
-  // 验证CRC
+  // 验证CRC (初始值0xFF)
   [[nodiscard]] bool verify_crc() const {
-    uint8_t expected = crc8_calculate(reinterpret_cast<const uint8_t*>(&data1), 12);
+    uint8_t expected = crc8_calculate(reinterpret_cast<const uint8_t*>(&header), 13);
     return crc == expected;
   }
   
@@ -103,16 +118,16 @@ struct VelocityCommand {
 
 // 姿态数据 (C_Board -> NUC)
 struct ChassisState {
-  float roll{0.0f};   // 横滚角 rad
-  float pitch{0.0f};  // 俯仰角 rad
-  float yaw{0.0f};    // 偏航角 rad
+  float roll{0.0f};           // 车体roll角 rad
+  float pitch_chassis{0.0f};  // 云台pitch角（相对于底盘） rad
+  float yaw_chassis{0.0f};    // 云台yaw角（相对于底盘） rad
   
   // 转换为原始数据包
   [[nodiscard]] RawPacket to_packet() const {
     RawPacket packet;
     packet.data1 = roll;
-    packet.data2 = pitch;
-    packet.data3 = yaw;
+    packet.data2 = pitch_chassis;
+    packet.data3 = yaw_chassis;
     packet.calculate_crc();
     return packet;
   }
@@ -215,9 +230,25 @@ private:
           // 复制到数据包结构
           std::memcpy(&current_packet_, buffer_.data(), PACKET_SIZE);
           
+          // 打印解析后的数据包（仅在DEBUG模式）
+          if (is_packet_debug_enabled()) {
+            printf("[PACKET] Header=%02X, Data1=%.4f, Data2=%.4f, Data3=%.4f, CRC=%02X, Tail=%02X\n",
+                   current_packet_.header,
+                   current_packet_.data1,
+                   current_packet_.data2, 
+                   current_packet_.data3,
+                   current_packet_.crc,
+                   current_packet_.tail);
+          }
+          
           // 验证CRC
           if (!current_packet_.verify_crc()) {
             ++error_count_;
+            if (is_packet_debug_enabled()) {
+              uint8_t calculated_crc = crc8_calculate(reinterpret_cast<const uint8_t*>(&current_packet_.header), CRC_CHECK_SIZE);
+              printf("[PACKET] CRC verification failed! Received CRC=0x%02X, Calculated CRC=0x%02X\n", 
+                     current_packet_.crc, calculated_crc);
+            }
             return ParseResult::CRC_ERROR;
           }
           
