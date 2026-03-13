@@ -6,7 +6,7 @@
 
 #include <cstdint>
 #include <cstring>
-#include <optional>
+#include <string>
 #include <array>
 #include <functional>
 #include <cstdlib>
@@ -176,17 +176,20 @@ public:
     callback_ = std::move(callback);
   }
   
-  // 输入数据并解析
+  // 输入数据并解析，返回本次批量处理中最后一个非 INCOMPLETE_DATA 结果
+  // 若所有字节均未触发完整包则返回 INCOMPLETE_DATA
   ParseResult feed(const uint8_t* data, size_t len) {
+    ParseResult last_result = ParseResult::INCOMPLETE_DATA;
     for (size_t i = 0; i < len; ++i) {
       ParseResult result = feed_byte(data[i]);
-      if (result == ParseResult::SUCCESS) {
-        if (callback_) {
+      if (result != ParseResult::INCOMPLETE_DATA) {
+        last_result = result;
+        if (result == ParseResult::SUCCESS && callback_) {
           callback_(current_packet_);
         }
       }
     }
-    return ParseResult::SUCCESS;
+    return last_result;
   }
   
   // 获取最后一个有效数据包
