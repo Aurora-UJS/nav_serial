@@ -5,11 +5,9 @@
 #define NAV_SERIAL__DRIVER__SERIAL_DRIVER_HPP_
 
 #include <atomic>
-#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <thread>
 
@@ -120,9 +118,9 @@ public:
   SerialDriver(const SerialDriver&) = delete;
   SerialDriver& operator=(const SerialDriver&) = delete;
   
-  // 允许移动
-  SerialDriver(SerialDriver&&) noexcept = default;
-  SerialDriver& operator=(SerialDriver&&) noexcept = default;
+  // 不可移动（std::atomic / std::mutex 成员不支持移动）
+  SerialDriver(SerialDriver&&) = delete;
+  SerialDriver& operator=(SerialDriver&&) = delete;
   
   //--- 生命周期管理 ---
   bool start();
@@ -171,7 +169,7 @@ private:
   // 发送数据
   protocol::VelocityCommand send_data_;
   std::mutex send_mutex_;
-  std::atomic<int> send_interval_ms_{10};
+  std::atomic<int> send_interval_us_{10000};
   
   // 线程
   std::unique_ptr<std::thread> recv_thread_;

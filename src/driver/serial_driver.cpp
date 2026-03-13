@@ -4,7 +4,6 @@
 #include "nav_serial/driver/serial_driver.hpp"
 #include "nav_serial/uart_transporter.hpp"
 
-#include <iostream>
 #include <cstdlib>
 
 namespace nav_serial::driver {
@@ -31,7 +30,7 @@ static bool is_debug_enabled() {
 SerialDriver::SerialDriver(SerialConfig config, DriverCallbacks callbacks)
   : config_(std::move(config))
   , callbacks_(std::move(callbacks))
-  , send_interval_ms_(config_.send_rate_hz > 0 ? 1000 / config_.send_rate_hz : 10)
+  , send_interval_us_(config_.send_rate_hz > 0 ? 1000000 / config_.send_rate_hz : 10000)
 {
   // 设置默认传输器工厂
   transporter_factory_ = [](const SerialConfig& cfg) {
@@ -200,7 +199,7 @@ void SerialDriver::send_loop() {
       }
     }
     
-    std::this_thread::sleep_for(std::chrono::milliseconds(send_interval_ms_.load()));
+    std::this_thread::sleep_for(std::chrono::microseconds(send_interval_us_.load()));
   }
 }
 
@@ -267,7 +266,7 @@ std::string SerialDriver::last_error() const {
 
 void SerialDriver::update_send_rate(int hz) {
   if (hz > 0) {
-    send_interval_ms_ = 1000 / hz;
+    send_interval_us_ = 1000000 / hz;
   }
 }
 
