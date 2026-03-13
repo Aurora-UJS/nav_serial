@@ -281,8 +281,8 @@ rm_interfaces::msg::GimbalState SerialDriverNode::chassis_state_to_gimbal_state(
   const protocol::ChassisState& state)
 {
   rm_interfaces::msg::GimbalState msg;
-  // msg.header.stamp = now();
-  // msg.header.frame_id = gimbal_frame_id_;
+  msg.header.stamp = now();
+  msg.header.frame_id = gimbal_frame_id_;
   
   msg.pitch = state.pitch_chassis;  // 底盘pitch角
   msg.yaw = state.yaw_chassis;      // 底盘yaw角
