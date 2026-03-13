@@ -223,8 +223,8 @@ void SerialDriverNode::on_driver_receive(const protocol::ChassisState& state) {
     auto gimbal_msg = chassis_state_to_gimbal_state(current_state_);
     gimbal_state_pub_->publish(gimbal_msg);
     
-    RCLCPP_INFO(get_logger(), "RX & Published: roll=%.2f, pitch=%.2f, yaw=%.2f", 
-                state.roll, state.pitch_chassis, state.yaw_chassis);
+    RCLCPP_DEBUG(get_logger(), "RX & Published: roll=%.2f, pitch=%.2f, yaw=%.2f",
+                 state.roll, state.pitch_chassis, state.yaw_chassis);
   }
 }
 
