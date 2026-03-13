@@ -18,7 +18,6 @@
 
 #include "nav_serial/uart_transporter.hpp"
 // System
-#include <errno.h>  /*错误号定义*/
 #include <fcntl.h>  /*文件控制定义*/
 #include <stdio.h>  /*标准输入输出定义*/
 #include <stdlib.h> /*标准函数库定义*/
@@ -42,11 +41,18 @@ bool UartTransporter::setParam(int speed, int flow_ctrl, int databits, int stopb
     return false;
   }
   // 设置串口输入波特率和输出波特率
+  bool speed_found = false;
   for (size_t i = 0; i < sizeof(speed_arr) / sizeof(int); i++) {
     if (speed == name_arr[i]) {
       cfsetispeed(&options, speed_arr[i]);
       cfsetospeed(&options, speed_arr[i]);
+      speed_found = true;
+      break;
     }
+  }
+  if (!speed_found) {
+    error_message_ = "Unsupported baud rate: " + std::to_string(speed);
+    return false;
   }
   // 修改控制模式，保证程序不会占用串口
   options.c_cflag |= CLOCAL;
