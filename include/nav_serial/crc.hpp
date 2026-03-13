@@ -96,44 +96,6 @@ inline bool crc16_verify(const uint8_t *data, size_t len, uint16_t expected_crc)
   return crc16_calculate(data, len) == expected_crc;
 }
 
-/********************************************************/
-/* Packet CRC Verification                              */
-/********************************************************/
-
-// 验证数据包完整性（帧头CRC8 + 数据CRC16）
-template <typename PacketType>
-inline bool verifyPacket(const PacketType &packet) {
-  const uint8_t *raw = reinterpret_cast<const uint8_t *>(&packet);
-
-  // 验证帧头 CRC8 (前3字节)
-  uint8_t header_crc = crc8_calculate(raw, 3);
-  if (header_crc != packet.frame_header.crc) {
-    return false;
-  }
-
-  // 验证数据 CRC16 (从帧头到数据段)
-  size_t data_len = sizeof(PacketType) - sizeof(uint16_t) - sizeof(uint8_t);  // 减去 crc 和 tail
-  uint16_t data_crc = crc16_calculate(raw, data_len);
-  if (data_crc != packet.crc) {
-    return false;
-  }
-
-  return true;
-}
-
-// 计算并填充数据包的CRC
-template <typename PacketType>
-inline void fillPacketCrc(PacketType &packet) {
-  uint8_t *raw = reinterpret_cast<uint8_t *>(&packet);
-
-  // 填充帧头 CRC8
-  packet.frame_header.crc = crc8_calculate(raw, 3);
-
-  // 填充数据 CRC16
-  size_t data_len = sizeof(PacketType) - sizeof(uint16_t) - sizeof(uint8_t);
-  packet.crc = crc16_calculate(raw, data_len);
-}
-
 }  // namespace aurora::serial_driver
 
 #endif  // RM_SERIAL_DRIVER__PROTOCOL__CRC_HPP_
