@@ -31,7 +31,7 @@ static bool is_debug_enabled() {
 SerialDriver::SerialDriver(SerialConfig config, DriverCallbacks callbacks)
   : config_(std::move(config))
   , callbacks_(std::move(callbacks))
-  , send_interval_ms_(1000 / config_.send_rate_hz)
+  , send_interval_ms_(config_.send_rate_hz > 0 ? 1000 / config_.send_rate_hz : 10)
 {
   // 设置默认传输器工厂
   transporter_factory_ = [](const SerialConfig& cfg) {
