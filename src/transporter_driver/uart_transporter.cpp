@@ -136,9 +136,10 @@ bool UartTransporter::setParam(int speed, int flow_ctrl, int databits, int stopb
   // 传输特殊字符，否则特殊字符0x0d,0x11,0x13会被屏蔽或映射。
   options.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
 
-  // 设置等待时间和最小接收字符
-  options.c_cc[VTIME] = 1;  // 读取一个字符等待1*(1/10)s
-  options.c_cc[VMIN] = 1;   // 读取字符的最少个数为1
+  // VMIN=0 + VTIME=1：绝对超时模式，100ms 内无数据时 read() 返回 0
+  // 使接收线程每 100ms 检查一次 running_ 标志，支持优雅关闭
+  options.c_cc[VTIME] = 1;
+  options.c_cc[VMIN] = 0;
   tcflush(fd_, TCIFLUSH);
 
   // 激活配置 (将修改后的termios数据设置到串口中）
